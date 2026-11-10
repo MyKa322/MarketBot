@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Market Tracker</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #17212b);
+    --card: var(--tg-theme-secondary-bg-color, #1d2733);
+    --text: var(--tg-theme-text-color, #e9edf2);
+    --muted: var(--tg-theme-hint-color, #7d8b99);
+    --link: var(--tg-theme-link-color, #5aa9e6);
+    --btn: var(--tg-theme-button-color, #3390ec);
+    --btn-text: var(--tg-theme-button-text-color, #fff);
+    --up: #4ecb71;
+    --down: #ef5350;
+    --radius: 14px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    margin:0;padding:12px 12px 28px;background:var(--bg);color:var(--text);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  }
+  h1{font-size:19px;margin:4px 0 14px}
+  .muted{color:var(--muted)}
+  .up{color:var(--up)} .down{color:var(--down)}
+  .card{background:var(--card);border-radius:var(--radius);padding:14px;margin-bottom:10px}
+  .card.tappable{cursor:pointer;transition:transform .08s ease,opacity .08s ease}
+  .card.tappable:active{transform:scale(.985);opacity:.85}
+
+  .summary{display:grid;grid-template-columns:1fr 1fr;gap:12px 10px;margin-top:10px}
+  .metric-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .metric-value{font-size:16px;font-weight:600;margin-top:2px}
+  .hero{font-size:27px;font-weight:700;letter-spacing:-.02em}
+
+  .row{display:flex;align-items:center;gap:12px}
+  .row .grow{flex:1;min-width:0}
+  .name{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  .price{text-align:right;white-space:nowrap}
+  .price .val{font-weight:600}
+  .price .chg{font-size:12px;margin-top:2px}
+  .thumb{width:40px;height:40px;border-radius:9px;background:rgba(255,255,255,.05);
+         object-fit:contain;flex:none}
+
+  .tabs{display:flex;gap:6px;margin:12px 0}
+  .tab{flex:1;text-align:center;padding:8px 0;border-radius:10px;background:var(--card);
+       color:var(--muted);font-size:13px;font-weight:600;cursor:pointer}
+  .tab.on{background:var(--btn);color:var(--btn-text)}
+
+  button.primary{width:100%;padding:13px;border:0;border-radius:11px;background:var(--btn);
+    color:var(--btn-text);font-size:15px;font-weight:600;cursor:pointer;margin-top:8px}
+  button.ghost{width:100%;padding:13px;border:1px solid rgba(255,255,255,.12);border-radius:11px;
+    background:transparent;color:var(--text);font-size:15px;font-weight:600;cursor:pointer;margin-top:8px}
+
+  .empty{text-align:center;padding:44px 20px;color:var(--muted)}
+  .empty .big{font-size:40px;margin-bottom:10px}
+  .skeleton{height:66px;border-radius:var(--radius);background:var(--card);
+            margin-bottom:10px;animation:pulse 1.3s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.5}50%{opacity:.85}}
+  .hidden{display:none}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}
+  .stat{background:rgba(255,255,255,.04);border-radius:10px;padding:9px 10px}
+  .banner{background:rgba(239,83,80,.14);border:1px solid rgba(239,83,80,.3);
+          border-radius:11px;padding:11px 13px;font-size:13px;margin-bottom:10px}
+</style>
+</head>
+<body>
+<div id="app"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
+<script>
+"use strict";
+const tg = window.Telegram?.WebApp;
+tg?.ready(); tg?.expand();
+
+const app = document.getElementById("app");
+const state = { currency: "USD", data: null, span: "7d", view: "list" };
+
+/* ---------------------------------------------------------------- utilities */
+
+const SYMBOLS = {USD:"$",EUR:"€",GBP:"£",RUB:"₽",BRL:"R$",JPY:"¥",
+                 UAH:"₴",PLN:"zł",TRY:"₺",CAD:"CDN$",AUD:"A$",CNY:"¥"};
+
+const fmtCache = {};
+function formatter(code){
+  if(!fmtCache[code]){
+    try{
+      // Intl pairs the symbol with the matching separators. Hand-assembling
+      // "$" + toLocaleString() produces "$1 043,22" under a European locale.
+      fmtCache[code] = new Intl.NumberFormat(undefined,
+        {style:"currency", currency:code, minimumFractionDigits:2, maximumFractionDigits:2});
+    }catch(_){
+      const sym = SYMBOLS[code] || (code + " ");
+      fmtCache[code] = {format: v => sym + v.toFixed(2)};
+    }
+  }
+  return fmtCache[code];
+}
+function money(value, code){
+  if(value === null || value === undefined) return "—";
+  return formatter(code || "USD").format(value);
+}
+function signed(value, code){
+  if(value === null || value === undefined) return "—";
+  return (value > 0 ? "+" : "") + money(value, code);
+}
+function compact(value){
+  if(value === null || value === undefined) return "—";
+  return new Intl.NumberFormat(undefined, {notation:"compact", maximumFractionDigits:1}).format(value);
+}
+function pct(value){
+  if(value === null || value === undefined) return "—";
+  return (value > 0 ? "+" : "") + value.toFixed(2) + "%";
+}
+function toneClass(value){
+  if(value === null || value === undefined || value === 0) return "muted";
+  return value > 0 ? "up" : "down";
+}
+function ago(iso){
+  if(!iso) return "never";
+  const secs = Math.max(0, (Date.now() - new Date(iso).getTime())/1000);
+  if(secs < 60) return "just now";
+  if(secs < 3600) return Math.floor(secs/60) + "m ago";
+  if(secs < 86400) return Math.floor(secs/3600) + "h ago";
+  return Math.floor(secs/86400) + "d ago";
+}
+function esc(text){
+  return String(text ?? "").replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function haptic(kind){ try{ tg?.HapticFeedback?.impactOccurred(kind || "light"); }catch(_){} }
+
+async function api(path, options){
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Telegram-Init-Data": tg?.initData || "",
+      ...(options?.headers || {})
+    }
+  });
+  if(!response.ok){
+    const detail = await response.json().catch(() => ({}));
+    throw new Error(detail.detail || ("HTTP " + response.status));
+  }
+  return response.json();
+}
+
+/* ------------------------------------------------------------------- charts */
+
+function lineChart(series, width, height){
+  if(!series || series.length < 2){
+    return '<div class="empty muted">Not enough history yet.</div>';
+  }
+  const pad = {t:10, r:6, b:16, l:6};
+  const prices = series.map(p => p.p);
+  const lo = Math.min(...prices), hi = Math.max(...prices);
+  const range = (hi - lo) || (hi || 1) * 0.02;
+  const innerW = width - pad.l - pad.r, innerH = height - pad.t - pad.b;
+
+  const x = i => pad.l + (i / (series.length - 1)) * innerW;
+  const y = v => pad.t + innerH - ((v - lo) / range) * innerH;
+
+  const line = series.map((p,i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.p).toFixed(1)).join(" ");
+  const area = line + " L" + x(series.length-1).toFixed(1) + " " + (pad.t+innerH) +
+               " L" + x(0).toFixed(1) + " " + (pad.t+innerH) + " Z";
+  const rising = prices[prices.length-1] >= prices[0];
+  const colour = rising ? "#4ecb71" : "#ef5350";
+  const gid = "g" + Math.random().toString(36).slice(2,8);
+
+  const hiIdx = prices.indexOf(hi), loIdx = prices.indexOf(lo);
+  const marker = (idx, value, above) => `
+    <circle cx="${x(idx).toFixed(1)}" cy="${y(value).toFixed(1)}" r="3" fill="${colour}"/>
+    <text x="${x(idx).toFixed(1)}" y="${(y(value) + (above ? -7 : 13)).toFixed(1)}"
+          font-size="10" fill="${colour}" text-anchor="middle" font-weight="600">
+      ${esc(money(value, state.currency))}
+    </text>`;
+
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" role="img">
+    <defs><linearGradient id="${gid}" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0%" stop-color="${colour}" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="${colour}" stop-opacity="0"/>
+    </linearGradient></defs>
+    <path d="${area}" fill="url(#${gid})"/>
+    <path d="${line}" fill="none" stroke="${colour}" stroke-width="2"
+          stroke-linejoin="round" stroke-linecap="round"/>
+    ${marker(hiIdx, hi, true)}
+    ${marker(loIdx, lo, false)}
+  </svg>`;
+}
+
+function sparkline(series){
+  if(!series || series.length < 2) return "";
+  const prices = series.map(p => p.p);
+  const lo = Math.min(...prices), hi = Math.max(...prices);
+  const range = (hi - lo) || 1;
+  const points = prices.map((v,i) =>
+    (i/(prices.length-1)*60).toFixed(1) + "," + (18 - ((v-lo)/range)*16).toFixed(1)).join(" ");
+  const colour = prices[prices.length-1] >= prices[0] ? "#4ecb71" : "#ef5350";
+  return `<svg viewBox="0 0 60 20" style="width:60px;height:20px"><polyline points="${points}"
+    fill="none" stroke="${colour}" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
+}
+
+/* -------------------------------------------------------------------- views */
+
+function renderList(){
+  const data = state.data;
+  const pf = data.portfolio;
+  const code = data.currency;
+  const tone = toneClass(pf.totalPnl);
+
+  const summary = `
+    <div class="card">
+      <div class="metric-label">Total profit / loss</div>
+      <div class="hero ${tone}">${esc(signed(pf.totalPnl, code))}</div>
+      <div class="summary">
+        <div><div class="metric-label">Open value</div>
+             <div class="metric-value">${esc(money(pf.marketValue, code))}</div></div>
+        <div><div class="metric-label">Cost basis</div>
+             <div class="metric-value">${esc(money(pf.costBasis, code))}</div></div>
+        <div><div class="metric-label">Unrealized</div>
+             <div class="metric-value ${toneClass(pf.unrealized)}">${esc(signed(pf.unrealized, code))}</div></div>
+        <div><div class="metric-label">Realized</div>
+             <div class="metric-value ${toneClass(pf.realized)}">${esc(signed(pf.realized, code))}</div></div>
+      </div>
+      <div class="sub" style="margin-top:12px">
+        ${pf.openPositions} open position(s)${pf.winRate !== null && pf.winRate !== undefined
+          ? " · " + pf.winRate.toFixed(0) + "% win rate" : ""}
+        · valued net of Steam's fee
+      </div>
+    </div>`;
+
+  const rows = data.items.length ? data.items.map(item => `
+    <div class="card tappable" data-item="${item.id}">
+      <div class="row">
+        ${item.icon ? `<img class="thumb" src="${esc(item.icon)}" alt="" loading="lazy">`
+                    : `<div class="thumb"></div>`}
+        <div class="grow">
+          <div class="name">${item.pinned ? "\u{1F4CC} " : ""}${esc(item.name)}</div>
+          <div class="sub">${esc(ago(item.updatedAt))}${
+            item.volume ? " · " + compact(item.volume) + " sold/24h" : ""}</div>
+        </div>
+        <div class="price">
+          <div class="val">${esc(money(item.price, code))}</div>
+          <div class="chg ${toneClass(item.change24h)}">${esc(pct(item.change24h))}</div>
+        </div>
+      </div>
+    </div>`).join("") : `
+    <div class="empty">
+      <div class="big">⭐</div>
+      <div>Your watchlist is empty.</div>
+      <div class="sub" style="margin-top:6px">Add items from the bot chat, by name or Market link.</div>
+    </div>`;
+
+  app.innerHTML = `<h1>Market Tracker</h1>${summary}
+    <div class="metric-label" style="margin:16px 0 8px">Watchlist</div>${rows}`;
+
+  app.querySelectorAll("[data-item]").forEach(node => {
+    node.addEventListener("click", () => { haptic(); openItem(Number(node.dataset.item)); });
+  });
+  tg?.BackButton?.hide();
+  state.view = "list";
+}
+
+function renderItem(detail){
+  const code = detail.currency;
+  const tabs = ["24h","7d","30d","90d"].map(span =>
+    `<div class="tab ${span === state.span ? "on" : ""}" data-span="${span}">${span}</div>`).join("");
+
+  const stale = detail.series.length === 0
+    ? `<div class="banner">No price history recorded yet. A refresh has been queued —
+        Steam's rate limits mean this can take a minute.</div>` : "";
+
+  app.innerHTML = `
+    <h1>${esc(detail.name)}</h1>
+    ${stale}
+    <div class="card">
+      <div class="row">
+        <div class="grow">
+          <div class="hero">${esc(money(detail.current, code))}</div>
+          <div class="sub">lowest listing</div>
+        </div>
+        <div class="price">
+          <div class="chg ${toneClass(detail.change24h)}">${esc(pct(detail.change24h))} <span class="muted">24h</span></div>
+          <div class="chg ${toneClass(detail.change7d)}">${esc(pct(detail.change7d))} <span class="muted">7d</span></div>
+        </div>
+      </div>
+      <div class="tabs">${tabs}</div>
+      ${lineChart(detail.series, 320, 150)}
+      <div class="stat-grid">
+        <div class="stat"><div class="metric-label">7d low</div>
+          <div class="metric-value">${esc(money(detail.low7d, code))}</div></div>
+        <div class="stat"><div class="metric-label">7d high</div>
+          <div class="metric-value">${esc(money(detail.high7d, code))}</div></div>
+        <div class="stat"><div class="metric-label">Volume</div>
+          <div class="metric-value">${compact(detail.volume)}</div></div>
+      </div>
+    </div>
+    <button class="${detail.watching ? "ghost" : "primary"}" id="watch">
+      ${detail.watching ? "☆ Remove from watchlist" : "⭐ Add to watchlist"}
+    </button>
+    <button class="ghost" id="refresh">↻ Request refresh</button>`;
+
+  app.querySelectorAll("[data-span]").forEach(node => {
+    node.addEventListener("click", () => {
+      state.span = node.dataset.span;
+      haptic();
+      openItem(detail.id);
+    });
+  });
+
+  document.getElementById("watch").addEventListener("click", async () => {
+    haptic("medium");
+    try{
+      await api(`/api/item/${detail.id}/watch`, {method:"POST"});
+      openItem(detail.id);
+    }catch(err){ tg?.showAlert?.(err.message); }
+  });
+
+  document.getElementById("refresh").addEventListener("click", async () => {
+    haptic("medium");
+    try{
+      const result = await api(`/api/item/${detail.id}/refresh`, {method:"POST"});
+      tg?.showAlert?.(result.queued
+        ? `Queued. ${result.backlog} item(s) ahead in the refresh queue.`
+        : "Already queued — an update is on its way.");
+    }catch(err){ tg?.showAlert?.(err.message); }
+  });
+
+  tg?.BackButton?.show();
+  state.view = "item";
+}
+
+/* ---------------------------------------------------------------- lifecycle */
+
+async function openItem(itemId){
+  try{
+    const detail = await api(`/api/item/${itemId}?span=${state.span}`);
+    renderItem(detail);
+  }catch(err){
+    app.innerHTML = `<div class="empty"><div class="big">⚠️</div><div>${esc(err.message)}</div></div>`;
+  }
+}
+
+async function loadOverview(){
+  try{
+    state.data = await api("/api/overview");
+    state.currency = state.data.currency;
+    renderList();
+  }catch(err){
+    app.innerHTML = `<div class="empty">
+      <div class="big">⚠️</div>
+      <div>${esc(err.message)}</div>
+      <div class="sub" style="margin-top:8px">Open this page from inside Telegram —
+        it authenticates with your Telegram session.</div></div>`;
+  }
+}
+
+tg?.BackButton?.onClick(() => { if(state.view === "item") renderList(); });
+tg?.onEvent?.("themeChanged", () => {
+  if(state.view === "list" && state.data) renderList();
+});
+
+loadOverview();
+</script>
+</body>
+</html>

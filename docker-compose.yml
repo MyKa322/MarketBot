@@ -1,0 +1,34 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://marketbot:marketbot@db:5432/marketbot
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./var:/app/var
+    # One replica only. A second instance would double the Steam request rate
+    # against the same IP budget and duplicate every alert.
+    deploy:
+      replicas: 1
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: marketbot
+      POSTGRES_PASSWORD: marketbot
+      POSTGRES_DB: marketbot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marketbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

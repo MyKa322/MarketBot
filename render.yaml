@@ -1,0 +1,33 @@
+# Render blueprint. Deploy: New > Blueprint, point it at this repo.
+#
+# Note the free plan sleeps a web service after ~15 minutes without inbound HTTP.
+# While asleep the scheduler does not run, so prices go stale and alerts do not fire.
+# Keep it awake with an external uptime pinger hitting /ping every 10 minutes, or use
+# a host that does not sleep. See DEPLOYMENT.md.
+services:
+  - type: web
+    name: marketbot
+    runtime: docker
+    plan: free
+    region: frankfurt
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      # Set in the Render dashboard, never in this file.
+      - key: BOT_TOKEN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      # The free disk is wiped on every deploy, so SQLite would lose the trade
+      # ledger. DATABASE_URL must point at an external Postgres (Neon, Supabase).
+      - key: HEALTH_ENABLED
+        value: "true"
+      - key: ENABLE_SCHEDULER
+        value: "true"
+      # Datacenter IPs get throttled by Steam harder than home connections.
+      - key: STEAM_RATE_PER_MIN
+        value: "10"
+      - key: REFRESH_HOT_SECONDS
+        value: "300"
+      - key: LOG_LEVEL
+        value: "INFO"

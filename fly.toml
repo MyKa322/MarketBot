@@ -1,0 +1,49 @@
+# fly.toml app configuration file generated for marketbot-lustrous-moon-6004 on 2026-09-18T19:00:42+03:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'marketbot-lustrous-moon-6004'
+primary_region = 'fra'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[deploy]
+  strategy = 'immediate'
+
+[env]
+  DATABASE_URL = 'sqlite+aiosqlite:////app/var/marketbot.db'
+  ENABLE_SCHEDULER = 'true'
+  HEALTH_ENABLED = 'true'
+  PORT = '8080'
+  REFRESH_HOT_SECONDS = '300'
+  # Below the default 18: Steam throttles datacenter IPs harder than home ones.
+  STEAM_RATE_PER_MIN = '10'
+
+# Without this the SQLite database lives on the container's temporary disk and is
+# destroyed on every deploy, taking the watchlist with it.
+[[mounts]]
+  source = 'marketbot_data'
+  destination = '/app/var'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # These three must not change. The scheduler and refresh worker run inside this
+  # process, so a stopped machine means no price updates and no alerts. And exactly
+  # one machine: two would poll the same Telegram token and fight over it.
+  auto_stop_machines = 'off'
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = '30s'
+    timeout = '5s'
+    grace_period = '40s'
+    method = 'GET'
+    path = '/healthz'
+
+[[vm]]
+  size = 'shared-cpu-1x'
+  memory = '512mb'

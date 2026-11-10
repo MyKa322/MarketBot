@@ -1,0 +1,47 @@
+# systemd unit for any always-on Linux box: an Oracle Cloud Always Free VM, any VPS,
+# or a Raspberry Pi. Install with:
+#
+#   sudo cp marketbot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now marketbot
+#   journalctl -u marketbot -f
+#
+# Adjust User= and the two paths if you did not clone to /opt/marketbot.
+[Unit]
+Description=MarketBot - Steam Market tracker for Telegram
+# network-online, not just network: the bot talks to Telegram immediately on start.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=marketbot
+WorkingDirectory=/opt/marketbot
+EnvironmentFile=/opt/marketbot/.env
+ExecStartPre=/opt/marketbot/.venv/bin/alembic upgrade head
+ExecStart=/opt/marketbot/.venv/bin/python -m marketbot
+
+# Always come back, but do not spin: a crash loop from a bad token would otherwise
+# hammer Telegram and Steam.
+Restart=always
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+# Give the bot time to finish an in-flight request and release its lock.
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+# Logs go to the journal; the app's own LOG_FILE is unnecessary here.
+StandardOutput=journal
+StandardError=journal
+
+# Basic hardening. The app writes only to its own var/ directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/marketbot/var
+
+[Install]
+WantedBy=multi-user.target

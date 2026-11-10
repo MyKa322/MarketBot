@@ -1,0 +1,25 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.git/
+.gitignore
+
+# Never bake secrets into an image.
+.env
+
+*.db
+*.db-journal
+# WAL sidecars appear once the bot has run; a -wal file holds recent database
+# contents, so it must not be baked into a published image.
+*.db-wal
+*.db-shm
+*.sqlite3
+var/
+logs/
+*.log
+tests/
+docs/
+.idea/
+.vscode/

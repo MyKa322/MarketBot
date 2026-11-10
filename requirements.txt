@@ -1,0 +1,28 @@
+# --- Telegram ---
+aiogram>=3.20,<4
+
+# --- HTTP ---
+httpx>=0.28,<0.29
+
+# --- Database ---
+SQLAlchemy[asyncio]>=2.0.36,<2.1
+alembic>=1.14,<2
+aiosqlite>=0.20
+# asyncpg>=0.30       # uncomment for PostgreSQL
+
+# --- Scheduling ---
+APScheduler>=3.11,<4
+
+# --- Config / validation ---
+pydantic>=2.10,<3
+pydantic-settings>=2.7,<3
+
+# --- Charts ---
+matplotlib>=3.10,<4
+
+# --- Mini App (optional) ---
+fastapi>=0.115,<1
+uvicorn>=0.34,<1
+
+# --- Misc ---
+orjson>=3.10

@@ -1,0 +1,26 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# Secrets: BOT_TOKEN and STEAM_LOGIN_SECURE live here.
+.env
+
+# Local data
+*.db
+*.db-journal
+# WAL mode writes these alongside the database.
+*.db-wal
+*.db-shm
+*.sqlite3
+var/
+logs/
+*.log
+
+.idea/
+.vscode/
+.DS_Store
